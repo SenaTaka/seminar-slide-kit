@@ -556,6 +556,17 @@ _SLIDE_RT = "http://schemas.openxmlformats.org/officeDocument/2006/relationships
 
 
 # ─── 保存の入口 ─────────────────────────────────────────────────────────────
+def _scrub_app_xml(prs):
+    """docProps/app.xml に元デッキのスライド題目一覧（TitlesOfParts）が残っていれば最小の内容にする。"""
+    for part in prs.part.package.iter_parts():
+        if str(part.partname) == "/docProps/app.xml":
+            if b"TitlesOfParts" in part.blob or b"<Company>" in part.blob:
+                part._blob = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Properties xmlns="http://schemas.'
+                              'openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.'
+                              'openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>Microsoft Office '
+                              'PowerPoint</Application></Properties>').encode()
+
+
 def _sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -623,6 +634,7 @@ def save_coedit(prs, out_path, init=False):
         pure_untouched = base is not None and base.get("pure", False) and _sha(out) == base.get("file_sha")
         if base is not None and "slides" in base and not pure_untouched:
             merged, rep = merge(out, gen, base)
+            _scrub_app_xml(merged)                   # 古い生成物に残る元デッキの題目一覧を消す（10/29）
             _atomic_save(merged, out)
             rp = bg / f"{out.stem}_{stamp}.merge.txt"
             rp.write_text("\n".join(rep) + "\n")

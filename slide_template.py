@@ -21,7 +21,7 @@ import re
 from lxml import etree
 
 # ─── テンプレートパス ─────────────────────────────────────────────────────────
-TEMPLATE_PATH = str(__import__("pathlib").Path(__file__).resolve().parent / "template" / "base.pptx")
+TEMPLATE_PATH = str(__import__("pathlib").Path(__file__).resolve().parent / "template" / "base.pptx")   # 掃除済み（10/29）
 
 # ─── スライドサイズ (EMU) ─────────────────────────────────────────────────────
 SLIDE_W = 12192000
@@ -125,6 +125,27 @@ def _scrub_metadata(prs):
     for rel in list(prs.part.rels.values()):
         if rel.reltype.endswith(("/authors", "/commentAuthors")):
             prs.part.drop_rel(rel.rId)
+    _scrub_app_props(prs)
+
+
+APP_XML_MIN = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Properties xmlns="http://schemas.openxmlformats.org/'
+               'officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/'
+               'docPropsVTypes"><Application>Microsoft Office PowerPoint</Application></Properties>').encode()
+
+
+def _app_part(prs):
+    for part in prs.part.package.iter_parts():
+        if str(part.partname) == "/docProps/app.xml":
+            return part
+    return None
+
+
+def _scrub_app_props(prs):
+    """docProps/app.xml を最小にする。テンプレート元デッキのスライド題目一覧（TitlesOfParts）・会社名などが残るため（10/29 実測）。
+    python-pptx は app.xml を更新しないので、生成デッキに元デッキの全題目が埋め込まれたままになる。"""
+    part = _app_part(prs)
+    if part is not None and part.blob != APP_XML_MIN:
+        part._blob = APP_XML_MIN
 
 
 # ─── 内部ヘルパー ──────────────────────────────────────────────────────────────
@@ -1558,6 +1579,9 @@ def audit(prs, ref_name="REF", min_pt=20, repeat_ok=("Conclusion",), warnings=No
             bad.append((0, 'meta', k, getattr(cp, k)))
     if any(r.reltype.endswith(("/authors", "/commentAuthors")) for r in prs.part.rels.values()):
         bad.append((0, 'meta', 'authors.xml', 'present'))
+    _ap = _app_part(prs)
+    if _ap is not None and (b"TitlesOfParts" in _ap.blob or b"<Company>" in _ap.blob):
+        bad.append((0, 'meta', 'app.xml', 'slide titles / company of the template deck'))
     color_word = re.compile(r"(（|\()(赤|青|黒|灰|破線|赤破線|太字)[^）)]*(）|\))|(赤|青)(字|枠|線|破線)|\b(red|blue|dashed)\s+(box|frame|line|text)\b", re.I)
     draft = re.compile(r"^\s*(TODO|XXX|\?\?\?|ここに|仮置き|未記入)")
     titles = []
@@ -1808,6 +1832,7 @@ def save(prs, out_path: str, italic_vars=True, coedit=True, coedit_init=False, c
     coedit=True（既定）: deck_merge.save_coedit で共同編集つき保存（PowerPoint で開いていたら止まる・
     既存ファイルを output/bg/ に時刻付きでコピー・手編集があれば 3-way マージ）。仕組み = deck_merge.py の冒頭。"""
     import os
+    _scrub_app_props(prs)
     if citations_only:
         keep_citation_footers(prs)
     if italic_vars:
